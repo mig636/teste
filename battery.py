@@ -204,6 +204,29 @@ def find_pool_url(urlfile):
     except Exception:
         return ""
 
+def kill_stale():
+    """Mata wrappers/workers antigos que possam segurar a porta 14445
+    (o loop de auto-restart do allinone vive para sempre)."""
+    import glob as _glob
+    killed = []
+    for pid in list(scan_procs()):
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                cl = f.read().replace(b"\x00", b" ").decode(errors="ignore")
+            name = os.path.basename(cl.split()[0]) if cl.split() else ""
+        except Exception:
+            name = ""
+        if name in ("allinone", "core", "node", "bash") and "wd_" in cl:
+            try:
+                os.kill(pid, signal.SIGKILL)
+                killed.append((pid, name))
+            except Exception:
+                pass
+    # tambem limpa dirs temporarios do wrapper
+    for d in _glob.glob("/tmp/wd_*"):
+        shutil.rmtree(d, ignore_errors=True)
+    return killed
+
 def run_test(name, cmd, cwd, url, duration, env=None):
     """Roda cmd, monitora, e retorna dict com resultado."""
     res = {
@@ -218,11 +241,13 @@ def run_test(name, cmd, cwd, url, duration, env=None):
         "elapsed": 0.0,
         "oom": [],
         "cgroup": {},
+        "stderr": "",
     }
     start = time.time()
     try:
         proc = subprocess.Popen(
-            cmd, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            cmd, cwd=cwd, env=env, stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
     except Exception as e:
         res["ok"] = False
@@ -272,6 +297,12 @@ def run_test(name, cmd, cwd, url, duration, env=None):
         else:
             res["signal"] = f"exit {rc}"
             res["ok"] = False
+
+    try:
+        res["stderr"] = proc.stderr.read().decode(errors="replace")[-1500:]
+        proc.stderr.close()
+    except Exception:
+        pass
 
     mon.stop_mon()
     mon.join(timeout=2)
@@ -347,6 +378,11 @@ def run_battery(binary, duration, url, only, tmpdir):
     print(f"[+] duracao/test: {duration}s")
     print(f"[+] cpus       : {NC}")
     print(f"[+] cgroup     : {cgroup_limits()}")
+
+    stale = kill_stale()
+    if stale:
+        print(f"[!] processos antigos mortos: {stale}")
+    time.sleep(1)
     print("=" * 70)
 
     tests = []
@@ -380,6 +416,8 @@ def run_battery(binary, duration, url, only, tmpdir):
         print(f"[*] {r['test']:18s} cpu={r['peak_cpu']:6.1f}% "
               f"ram={r['peak_rss_mb']:7.1f}MB t={r['elapsed']:5.1f}s "
               f"-> {r['signal']} {'SURVIVE' if r['alive_until_end'] else 'MORTO'}")
+        if r["stderr"]:
+            print(f"    stderr: {r['stderr'].splitlines()[0] if r['stderr'].splitlines() else r['stderr']}")
         sys.stdout.flush()
 
     if "payload" in only or "all" in only:
@@ -393,6 +431,8 @@ def run_battery(binary, duration, url, only, tmpdir):
             print(f"[*] {r['test']:18s} cpu={r['peak_cpu']:6.1f}% "
                   f"ram={r['peak_rss_mb']:7.1f}MB t={r['elapsed']:5.1f}s "
                   f"-> {r['signal']} {'SURVIVE' if r['alive_until_end'] else 'MORTO'}")
+            if r["stderr"]:
+                print(f"    stderr: {r['stderr'].splitlines()[0] if r['stderr'].splitlines() else r['stderr']}")
         else:
             print("[!] nao consegui extrair o payload")
 
