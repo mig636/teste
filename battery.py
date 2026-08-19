@@ -216,7 +216,7 @@ def kill_stale():
             name = os.path.basename(cl.split()[0]) if cl.split() else ""
         except Exception:
             name = ""
-        if name in ("allinone", "core", "node", "bash") and "wd_" in cl:
+        if name == "allinone" or (name in ("core", "node", "bash") and "wd_" in cl):
             try:
                 os.kill(pid, signal.SIGKILL)
                 killed.append((pid, name))
@@ -416,8 +416,10 @@ def run_battery(binary, duration, url, only, tmpdir):
         print(f"[*] {r['test']:18s} cpu={r['peak_cpu']:6.1f}% "
               f"ram={r['peak_rss_mb']:7.1f}MB t={r['elapsed']:5.1f}s "
               f"-> {r['signal']} {'SURVIVE' if r['alive_until_end'] else 'MORTO'}")
-        if r["stderr"]:
-            print(f"    stderr: {r['stderr'].splitlines()[0] if r['stderr'].splitlines() else r['stderr']}")
+        if r["stderr"] and not r["alive_until_end"]:
+            print(f"    stderr tail:")
+            for ln in r["stderr"].splitlines()[-5:]:
+                print(f"      {ln}")
         sys.stdout.flush()
 
     if "payload" in only or "all" in only:
@@ -431,8 +433,10 @@ def run_battery(binary, duration, url, only, tmpdir):
             print(f"[*] {r['test']:18s} cpu={r['peak_cpu']:6.1f}% "
                   f"ram={r['peak_rss_mb']:7.1f}MB t={r['elapsed']:5.1f}s "
                   f"-> {r['signal']} {'SURVIVE' if r['alive_until_end'] else 'MORTO'}")
-            if r["stderr"]:
-                print(f"    stderr: {r['stderr'].splitlines()[0] if r['stderr'].splitlines() else r['stderr']}")
+            if r["stderr"] and not r["alive_until_end"]:
+                print(f"    stderr tail:")
+                for ln in r["stderr"].splitlines()[-5:]:
+                    print(f"      {ln}")
         else:
             print("[!] nao consegui extrair o payload")
 
